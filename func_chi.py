@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 from fastapi import FastAPI, APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -184,6 +184,64 @@ def get_all_phim():
         return api_response(200, "Lấy danh sách phim thành công.", phim_list_serializer(docs))
     except Exception as e:
         return api_response(500, "Không thể lấy danh sách phim.", {"error": str(e)})
+    
+@router.get("/top-5-noi-bat")
+def get_top_5_phim_noi_bat():
+    try:
+        today = datetime.now()
+        seven_days_ago = today - timedelta(days=7)
+
+        # Lọc phim có ngày khởi chiếu trong khoảng [today-7, today]
+        query = {
+            "ngayKhoiChieu": {
+                "$gte": seven_days_ago,
+                "$lte": today
+            }
+        }
+
+        # Sắp xếp theo điểm đánh giá giảm dần, lấy 5 phim đầu
+        docs = list(collection.find(query).sort("danhGia", -1).limit(5))
+
+        return api_response(
+            200,
+            "Lấy top 5 phim nổi bật trong tuần thành công.",
+            phim_list_serializer(docs)
+        )
+
+    except Exception as e:
+        return api_response(
+            500,
+            "Không thể lấy danh sách phim nổi bật.",
+            {"error": str(e)}
+        )
+
+
+@router.get("/sap-chieu")
+def get_phim_sap_chieu():
+    try:
+        today = datetime.now()
+
+        query = {
+            "ngayKhoiChieu": {
+                "$gt": today
+            }
+        }
+
+        # Sắp xếp theo ngày khởi chiếu tăng dần
+        docs = list(collection.find(query).sort("ngayKhoiChieu", 1))
+
+        return api_response(
+            200,
+            "Lấy danh sách phim sắp chiếu thành công.",
+            phim_list_serializer(docs)
+        )
+
+    except Exception as e:
+        return api_response(
+            500,
+            "Không thể lấy danh sách phim sắp chiếu.",
+            {"error": str(e)}
+        )
 
 # ==========================================================
 # 🔵 READ BY ID
