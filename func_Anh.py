@@ -21,7 +21,7 @@ class RapBase(BaseModel):
     ten_rap: str
     dia_chi: str
     so_dien_thoai: str
-    so_phong: int
+    so_phong: Optional[int] = 0
     mo_ta: Optional[str] = ""
     danh_sach_phong_chieu: List[PhongChieu] = []
 
@@ -116,7 +116,7 @@ class Anh:
 
     def tao_rap(self, rap_data: RapCreate):
         try:
-            if not all([rap_data.ten_rap, rap_data.dia_chi, rap_data.so_dien_thoai, rap_data.so_phong]):
+            if not all([rap_data.ten_rap, rap_data.dia_chi, rap_data.so_dien_thoai]):
                 raise HTTPException(status_code=400, detail="Thiếu thông tin bắt buộc")
 
             existing_rap = self.collection.find_one({"tenRap": rap_data.ten_rap, "diaChi": rap_data.dia_chi})

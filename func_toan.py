@@ -1,13 +1,12 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from datetime import datetime
 from bson import ObjectId
 from conn import get_mongo_client
-from passlib.hash import bcrypt
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List
-import re
+from typing import Optional
+import hashlib, os, re
 
 # ====== KẾT NỐI MONGO ======
 client = get_mongo_client()
@@ -24,6 +23,18 @@ def convert_objectid(data):
         data["_id"] = str(data["_id"])
     return data
 
+# ====== HASH PASSWORD ======
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)  # 16 bytes random salt
+    hashed = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000)
+    return salt.hex() + ":" + hashed.hex()
+
+def verify_password(password: str, hashed: str) -> bool:
+    salt_hex, hash_hex = hashed.split(":")
+    salt = bytes.fromhex(salt_hex)
+    new_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100_000)
+    return new_hash.hex() == hash_hex
+
 # ====== SCHEMA ======
 class UserRegister(BaseModel):
     tenDangNhap: str = Field(..., min_length=3, max_length=20)
@@ -38,13 +49,13 @@ class UserLogin(BaseModel):
     matKhau: str
 
 class UserUpdate(BaseModel):
-    hoTen: Optional[str]
-    email: Optional[EmailStr]
-    soDienThoai: Optional[str]
-    vaiTro: Optional[str]
-    matKhau: Optional[str]
+    hoTen: Optional[str] = None
+    email: Optional[EmailStr] = None
+    soDienThoai: Optional[str] = None
+    vaiTro: Optional[str] = None
+    matKhau: Optional[str] = None
 
-# ====== CLASS TOAN (Xử lý người dùng) ======
+# ====== CLASS TOAN ======
 class Toan:
     def __init__(self):
         self.router = APIRouter(prefix="/api/NguoiDung", tags=["NguoiDung"])
@@ -63,7 +74,7 @@ class Toan:
             if user.soDienThoai and not re.match(r"^\d{10,11}$", user.soDienThoai):
                 raise HTTPException(status_code=400, detail="Số điện thoại phải từ 10-11 chữ số")
 
-            hashed_pw = bcrypt.hash(user.matKhau)
+            hashed_pw = hash_password(user.matKhau)
             new_user = {
                 "tenDangNhap": user.tenDangNhap,
                 "matKhau": hashed_pw,
@@ -81,7 +92,7 @@ class Toan:
         @self.router.post("/login")
         def login(user: UserLogin):
             db_user = nguoi_dung_col.find_one({"tenDangNhap": user.tenDangNhap})
-            if not db_user or not bcrypt.verify(user.matKhau, db_user["matKhau"]):
+            if not db_user or not verify_password(user.matKhau, db_user["matKhau"]):
                 raise HTTPException(status_code=401, detail="Sai tên đăng nhập hoặc mật khẩu")
 
             convert_objectid(db_user)
@@ -113,9 +124,21 @@ class Toan:
         # ---- Cập nhật người dùng ----
         @self.router.put("/{tenDangNhap}")
         def update_user(tenDangNhap: str, update: UserUpdate):
-            data = {k: v for k, v in update.dict().items() if v is not None}
+            data = {k: v for k, v in update.dict(exclude_unset=True).items() if v is not None}
+
+            # Validate mật khẩu
             if "matKhau" in data:
-                data["matKhau"] = bcrypt.hash(data["matKhau"])
+                pw = data["matKhau"]
+                if not isinstance(pw, str):
+                    raise HTTPException(status_code=400, detail="Mật khẩu không hợp lệ")
+                if not re.search(r"[A-Z]", pw) or not re.search(r"[a-z]", pw) or not re.search(r"[0-9]", pw):
+                    raise HTTPException(status_code=400, detail="Mật khẩu phải có ít nhất 1 chữ hoa, 1 chữ thường và 1 số")
+                data["matKhau"] = hash_password(pw)
+
+            # Validate số điện thoại
+            if "soDienThoai" in data and data["soDienThoai"]:
+                if not re.match(r"^\d{10,11}$", data["soDienThoai"]):
+                    raise HTTPException(status_code=400, detail="Số điện thoại phải từ 10-11 chữ số")
 
             result = nguoi_dung_col.update_one({"tenDangNhap": tenDangNhap}, {"$set": data})
             if result.matched_count == 0:
