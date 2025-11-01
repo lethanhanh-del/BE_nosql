@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from func_Anh import router_rap as router_anh
+from func_Anh_rap import router_rap
+from func_Anh_dashboard import router_dashboard
 from func_chi import router as router_chi
 from func_lam import router as router_lam
 from func_toan import Toan
@@ -18,7 +19,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(router_anh) #anh
+app.include_router(router_rap) #anh
+app.include_router(router_dashboard)
 app.include_router(router_chi) #chi
 app.include_router(router_lam) #lam
 app.include_router(Toan().router) #toan
