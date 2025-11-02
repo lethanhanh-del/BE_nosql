@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import re
-from fastapi import FastAPI, APIRouter, Body, HTTPException, Request
+from fastapi import FastAPI, APIRouter, Body, HTTPException, Request, Query
+from typing import Optional
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from conn import get_mongo_client
@@ -178,9 +179,37 @@ def create_phim(phim_data: dict = Body(...)):
 # 🟡 READ ALL
 # ==========================================================
 @router.get("/")
-def get_all_phim():
+def get_all_phim(
+    sort_by: Optional[str] = Query(
+        None,
+        description="Field to sort by: 'danhGia' or 'ngayKhoiChieu'",
+    ),
+    order: str = Query(
+        "desc",
+        regex="^(asc|desc)$",
+        description="Sort order: 'asc' or 'desc'",
+    ),
+):
+    """Get all phim. Optional query params:
+    - sort_by: 'danhGia' or 'ngayKhoiChieu'
+    - order: 'asc' or 'desc' (default 'desc')
+    """
     try:
-        docs = list(collection.find())
+        # If client requested sorting, validate and apply it
+        if sort_by:
+            allowed = {"danhGia", "ngayKhoiChieu"}
+            if sort_by not in allowed:
+                return api_response(
+                    400,
+                    "Trường sort_by chỉ chấp nhận 'danhGia' hoặc 'ngayKhoiChieu'.",
+                    {"sort_by": sort_by},
+                )
+
+            sort_direction = -1 if order == "desc" else 1
+            docs = list(collection.find().sort(sort_by, sort_direction))
+        else:
+            docs = list(collection.find())
+
         return api_response(200, "Lấy danh sách phim thành công.", phim_list_serializer(docs))
     except Exception as e:
         return api_response(500, "Không thể lấy danh sách phim.", {"error": str(e)})
@@ -262,18 +291,12 @@ def get_phim_by_id(phim_id: str):
 @router.put("/{phim_id}")
 def update_phim(phim_id: str, update_data: dict = Body(...)):
     try:
-        required_fields = [
-            "tenPhim", "theLoai", "daoDien", "thoiLuong",
-            "ngayKhoiChieu", "moTa", "trailerURL", "hinhAnh", "danhGia"
-        ]
-        missing_fields = [f for f in required_fields if f not in update_data]
-        if missing_fields:
-            return api_response(400, "Thiếu dữ liệu bắt buộc.", {"missing_fields": missing_fields})
-
+        # 1️⃣ Kiểm tra phim có tồn tại không
         phim_exist = collection.find_one({"_id": phim_id})
         if not phim_exist:
             return api_response(404, "Không tìm thấy phim để cập nhật.", {"id": phim_id})
 
+        # 2️⃣ Validate các trường có trong update_data (không ép bắt buộc đủ)
         if "tenPhim" in update_data:
             err = validate_ten_phim_unique(update_data["tenPhim"], current_id=phim_id)
             if err:
@@ -296,11 +319,19 @@ def update_phim(phim_id: str, update_data: dict = Body(...)):
             if err:
                 return api_response(408, err, {"danhGia": update_data["danhGia"]})
 
+        # 3️⃣ Nếu không có field nào được gửi → báo lỗi
+        if not update_data:
+            return api_response(400, "Không có dữ liệu để cập nhật.", None)
+
+        # 4️⃣ Thực hiện cập nhật
         collection.update_one({"_id": phim_id}, {"$set": update_data})
         updated_doc = collection.find_one({"_id": phim_id})
+
         return api_response(200, "Cập nhật phim thành công.", phim_serializer(updated_doc))
+
     except Exception as e:
         return api_response(500, "Không thể cập nhật phim.", {"error": str(e)})
+
 
 # ==========================================================
 # 🔴 DELETE
