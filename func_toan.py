@@ -7,6 +7,7 @@ from conn import get_mongo_client
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 import hashlib, os, re
+from pymongo import DESCENDING
 
 # ====== KẾT NỐI MONGO ======
 client = get_mongo_client()
@@ -55,39 +56,86 @@ class UserUpdate(BaseModel):
     vaiTro: Optional[str] = None
     matKhau: Optional[str] = None
 
+def _next_ma_nguoi_dung() -> str:
+    pipeline = [
+        {"$match": {"maNguoiDung": {"$regex": "^User\\d+$"}}},
+        {"$sort": {"maNguoiDung": DESCENDING}},
+        {"$limit": 1},
+        {"$project": {"num": {"$toInt": {"$substr": ["$maNguoiDung", 4, -1]}}}}
+    ]
+    result = list(nguoi_dung_col.aggregate(pipeline))
+    next_num = (result[0]["num"] + 1) if result else 1
+    return f"User{next_num}"    
+
 # ====== CLASS TOAN ======
 class Toan:
     def __init__(self):
         self.router = APIRouter(prefix="/api/NguoiDung", tags=["NguoiDung"])
-
         # ---- Đăng ký ----
         @self.router.post("/register")
         def register(user: UserRegister):
+            # === 1. Kiểm tra trùng tên đăng nhập ===
             if nguoi_dung_col.find_one({"tenDangNhap": user.tenDangNhap}):
                 raise HTTPException(status_code=400, detail="Tên đăng nhập đã tồn tại")
 
-            # Kiểm tra mật khẩu hợp lệ
-            if not re.search(r"[A-Z]", user.matKhau) or not re.search(r"[a-z]", user.matKhau) or not re.search(r"[0-9]", user.matKhau):
+            # === 2. Validate mật khẩu ===
+            if not all([
+                re.search(r"[A-Z]", user.matKhau),
+                re.search(r"[a-z]", user.matKhau),
+                re.search(r"[0-9]", user.matKhau)
+            ]):
                 raise HTTPException(status_code=400, detail="Mật khẩu phải có ít nhất 1 chữ hoa, 1 chữ thường và 1 số")
 
-            # Kiểm tra số điện thoại
+            # === 3. Validate số điện thoại ===
             if user.soDienThoai and not re.match(r"^\d{10,11}$", user.soDienThoai):
                 raise HTTPException(status_code=400, detail="Số điện thoại phải từ 10-11 chữ số")
 
+            # === 4. Sinh mã UserXX đúng thứ tự (User10 → User11) ===
+            pipeline = [
+                {"$match": {"maNguoiDung": {"$regex": "^User\\d+$"}}},
+                {"$addFields": {"num": {"$toInt": {"$substr": ["$maNguoiDung", 4, -1]}}}},
+                {"$sort": {"num": -1}},
+                {"$limit": 1}
+            ]
+            result = list(nguoi_dung_col.aggregate(pipeline))
+            
+            if result:
+                last_num = result[0]["num"]
+                ma_moi = f"User{last_num + 1}"
+            else:
+                ma_moi = "User1"
+
+            print(f"[DEBUG] Mã người dùng mới: {ma_moi}")  # Dễ debug
+
+            # === 5. Hash mật khẩu ===
             hashed_pw = hash_password(user.matKhau)
+
+            # === 6. Tạo document ===
             new_user = {
+                "maNguoiDung": ma_moi,
                 "tenDangNhap": user.tenDangNhap,
                 "matKhau": hashed_pw,
-                "hoTen": user.hoTen,
+                "hoTen": user.hoTen or "",
                 "email": user.email,
                 "soDienThoai": user.soDienThoai,
-                "vaiTro": user.vaiTro,
+                "vaiTro": user.vaiTro or "user",
                 "ngayDangKy": datetime.now()
             }
-            nguoi_dung_col.insert_one(new_user)
-            convert_objectid(new_user)
-            return {"message": "Đăng ký thành công", "user": new_user}
 
+            # === 7. Insert ===
+            try:
+                insert_result = nguoi_dung_col.insert_one(new_user)
+            except pymongo.errors.DuplicateKeyError as e:
+                raise HTTPException(status_code=500, detail=f"Trùng mã người dùng: {e}")
+
+            # === 8. Trả về (không có matKhau) ===
+            inserted_user = nguoi_dung_col.find_one(
+                {"_id": insert_result.inserted_id},
+                {"matKhau": 0}
+            )
+            convert_objectid(inserted_user)
+            return {"message": "Đăng ký thành công", "user": inserted_user}
+        
         # ---- Đăng nhập ----
         @self.router.post("/login")
         def login(user: UserLogin):
@@ -99,6 +147,7 @@ class Toan:
             return {
                 "message": "Đăng nhập thành công",
                 "user": {
+                    "manguoidung": db_user["maNguoiDung"],
                     "tenDangNhap": db_user["tenDangNhap"],
                     "email": db_user.get("email", ""),
                     "vaiTro": db_user.get("vaiTro", "user")
