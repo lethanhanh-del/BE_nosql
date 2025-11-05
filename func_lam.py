@@ -23,6 +23,8 @@ class SuatChieuCreate(BaseModel):
 
 class SuatChieuUpdate(BaseModel):
     # Chỉ các trường được phép update
+    phim_id: Optional[str] = None  # ID phim
+    rap_id: Optional[str] = None  # ID rạp
     ten_Phong: Optional[str] = None  # Tên phòng chiếu
     gioBatDau: Optional[str] = None  # Giờ bắt đầu
     gioKetThuc: Optional[str] = None  # Giờ kết thúc
@@ -344,6 +346,7 @@ class Lam:
             return {"error": f"Lỗi khi tạo suất chiếu: {str(e)}", "status": 500}
 
     def update_suat_chieu(self, suat_chieu_id: str, gia_ve: Optional[int] = None, 
+                         phim_id: Optional[str] = None, rap_id: Optional[str] = None,
                          ten_Phong: Optional[str] = None, 
                          gio_bat_dat: Optional[str] = None, gio_ket_thuc: Optional[str] = None):
         try:
@@ -353,10 +356,33 @@ class Lam:
 
             update_data = {}
             
+            # Kiểm tra và validate phim_id nếu có update (loại bỏ empty string và None)
+            if phim_id is not None and str(phim_id).strip():
+                phim_id_clean = str(phim_id).strip()
+                phim = self.phim_collection.find_one({"_id": phim_id_clean})
+                if not phim:
+                    return {"error": f"Phim không tồn tại với id='{phim_id_clean}'", "status": 404}
+                update_data["phim_id"] = phim_id_clean
+
+            # Kiểm tra và validate rap_id nếu có update (loại bỏ empty string và None)
+            if rap_id is not None and str(rap_id).strip():
+                rap_id_clean = str(rap_id).strip()
+                rap = self.rap_collection.find_one({"_id": rap_id_clean})
+                if not rap:
+                    return {"error": f"Rạp không tồn tại với id='{rap_id_clean}'", "status": 404}
+                update_data["rap_id"] = rap_id_clean
+            
             if gia_ve is not None:
                 update_data["giaVe"] = gia_ve
 
             if ten_Phong is not None:
+                # Xác định rap_id để kiểm tra (dùng rap_id mới nếu có update, không thì dùng rap_id cũ)
+                rap_id_to_check = update_data.get("rap_id") if "rap_id" in update_data else existing_suat_chieu.get("rap_id")
+                if rap_id_to_check:
+                    # Kiểm tra ten_Phong có tồn tại trong rạp không
+                    so_ghe_rap = self._get_so_ghe_from_rap(rap_id_to_check, ten_Phong)
+                    if so_ghe_rap == 0:
+                        return {"error": f"Không tìm thấy phòng chiếu '{ten_Phong}' trong rạp", "status": 404}
                 update_data["ten_Phong"] = ten_Phong
 
             if gio_bat_dat:
@@ -381,11 +407,11 @@ class Lam:
                 except Exception as e:
                     return {"error": f"Format gio_ket_thuc không hợp lệ: {str(e)}", "status": 400}
             
-            # Kiểm tra trùng lặp nếu có update gioBatDau, gioKetThuc hoặc ten_Phong
-            if "gioBatDau" in update_data or "gioKetThuc" in update_data or "ten_Phong" in update_data:
+            # Kiểm tra trùng lặp nếu có update gioBatDau, gioKetThuc, ten_Phong, phim_id, hoặc rap_id
+            if "gioBatDau" in update_data or "gioKetThuc" in update_data or "ten_Phong" in update_data or "phim_id" in update_data or "rap_id" in update_data:
                 # Xác định các giá trị để kiểm tra (dùng giá trị mới nếu có update, không thì dùng giá trị cũ)
-                phim_id_check = existing_suat_chieu.get("phim_id")
-                rap_id_check = existing_suat_chieu.get("rap_id")
+                phim_id_check = update_data.get("phim_id") if "phim_id" in update_data else existing_suat_chieu.get("phim_id")
+                rap_id_check = update_data.get("rap_id") if "rap_id" in update_data else existing_suat_chieu.get("rap_id")
                 ten_Phong_check = update_data.get("ten_Phong") if "ten_Phong" in update_data else existing_suat_chieu.get("ten_Phong", "")
                 
                 # Xác định gioBatDau và gioKetThuc để kiểm tra
@@ -482,7 +508,7 @@ class Lam:
                 {"_id": suat_chieu_id},
                 {"$set": update_data}
             )
-
+            
             if result.modified_count > 0:
                 return {"message": "Cập nhật suất chiếu thành công", "status": 200}
             else:
@@ -738,7 +764,9 @@ async def update_suat_chieu(suat_chieu_id: str, suat_chieu_data: SuatChieuUpdate
     """Cập nhật thông tin suất chiếu với các trường được phép"""
     lam = Lam()
     try:
-        # Chỉ sử dụng các trường được phép: giaVe, ten_Phong, gioBatDau, gioKetThuc
+        # Sử dụng các trường được phép: phim_id, rap_id, giaVe, ten_Phong, gioBatDau, gioKetThuc
+        phim_id = suat_chieu_data.phim_id
+        rap_id = suat_chieu_data.rap_id
         gia_ve = suat_chieu_data.giaVe
         ten_Phong = suat_chieu_data.ten_Phong
         gio_bat_dau = suat_chieu_data.gioBatDau
@@ -748,6 +776,8 @@ async def update_suat_chieu(suat_chieu_id: str, suat_chieu_data: SuatChieuUpdate
         result = lam.update_suat_chieu(
             suat_chieu_id,
             gia_ve,
+            phim_id,
+            rap_id,
             ten_Phong,
             gio_bat_dau,
             gio_ket_thuc
