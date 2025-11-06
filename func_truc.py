@@ -48,7 +48,13 @@ def ve_serializer(ve) -> dict:
 # ==========================
 # 🚀 API Routes
 # ==========================
-
+@router.get("/{user_id}")
+def lay_ve_theo_nguoi_dung(user_id: str):
+    ves = list(ve_collection.find({"nguoiDung_id": user_id}))
+    # không tìm thấy vé nào trả mảng rỗng
+    if not ves:
+        return []
+    return [ve_serializer(v) for v in ves]
 @router.post("/dat-ve")
 def dat_ve(ve_data: VeCreate):
     """API đặt vé xem phim"""
@@ -231,13 +237,7 @@ def sua_ve(ve_id: str, ve_data: VeUpdate):
     return {"message": "Cập nhật vé thành công", "data": ve_serializer(updated)}
 
 
-@router.get("/{user_id}")
-def lay_ve_theo_nguoi_dung(user_id: str):
-    ves = list(ve_collection.find({"nguoiDung_id": user_id}))
-    # không tìm thấy vé nào trả mảng rỗng
-    if not ves:
-        raise HTTPException(status_code=404, detail="Không tìm thấy vé nào cho người dùng này")
-    return [ve_serializer(v) for v in ves]
+
 
 
 @router.put("/huy-ve/{ve_id}")
