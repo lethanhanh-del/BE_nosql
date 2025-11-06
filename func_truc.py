@@ -48,6 +48,18 @@ def ve_serializer(ve) -> dict:
 # ==========================
 # 🚀 API Routes
 # ==========================
+@router.get("/get-all")
+def lay_tat_ca_ve():
+    """Lấy toàn bộ danh sách vé """
+    try:
+        ves = list(ve_collection.find())
+        total = len(ves)
+        return {
+            "total": total,
+            "data": [ve_serializer(v) for v in ves]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi lấy vé: {str(e)}")
 @router.get("/{user_id}")
 def lay_ve_theo_nguoi_dung(user_id: str):
     ves = list(ve_collection.find({"nguoiDung_id": user_id}))
@@ -97,18 +109,7 @@ def dat_ve(ve_data: VeCreate):
 
 
 
-@router.get("/get-all")
-def lay_tat_ca_ve():
-    """Lấy toàn bộ danh sách vé (không phân trang)."""
-    try:
-        ves = list(ve_collection.find().sort("ngayThanhToan", -1))
-        total = len(ves)
-        return {
-            "total": total,
-            "data": [ve_serializer(v) for v in ves]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi khi lấy vé: {str(e)}")
+
 
 
 
