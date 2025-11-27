@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from datetime import datetime
 from bson import ObjectId
+import pymongo
 from conn import get_mongo_client
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
